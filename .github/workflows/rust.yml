@@ -17,8 +17,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      working-directory: ./app
+      working-directory: ./backend
       run: cargo build --verbose
     # - name: Run tests
-    #   working-directory: ./app
+    #   working-directory: ./backend
     #   run: cargo test --verbose
