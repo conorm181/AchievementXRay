@@ -13,7 +13,10 @@ use axum::{
 };
 use reqwest::{Client, Response};
 use serde_json::Value;
+use cached::proc_macro::cached;
 
+// Static http client to be reused across the app
+// Held in an Arc for thread safety
 lazy_static!{
     static ref REQWEST_CLIENT: Arc<Client> = {
         let mut headers = reqwest::header::HeaderMap::new();
@@ -30,31 +33,47 @@ struct UrlParams {
     url: String,
 }
 
+
+#[derive(Clone)]
+struct StatusResponse {
+    status: StatusCode,
+    body: Value
+}
+
 #[tokio::main]
 async fn main() {
     // initialize tracing
     tracing_subscriber::fmt::init();
-
     // build our application with a route
     let app = Router::new()
-        .route("/SearchGames/:url", get(get_steam_apps));
+        .route("/SearchGames/:url", get(search_steam_apps));
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn get_steam_apps(Path(UrlParams {url}): Path<UrlParams>) -> impl IntoResponse {
-    // let _client = Client::new();
-    let resp: Response = REQWEST_CLIENT.get("https://api.steampowered.com/ISteamApps/GetAppList/v0002/").send().await.unwrap();
-    let status: StatusCode = resp.status();
-    let json_response: Value = resp.json::<serde_json::Value>().await.unwrap();
-    let _response: &Value = json_response.get("applist").and_then(|val| val.get("apps")).unwrap();
-    // let search_term = "Balatro";
+/// - GET ENDPOINT
+/// - Params: Url path parameter for search
+/// - Returns: Status Code and JSON list of Returned Apps
+async fn search_steam_apps(Path(UrlParams {url}): Path<UrlParams>) -> impl IntoResponse {
+    let StatusResponse {status, body:_response} = get_steam_apps().await;  
     let vals:Vec<String> = search(_response.clone(), url);
-    // (status, Json(_response.clone()))
     (status, Json(vals))
 }
 
+// Function to fetch all registered steam apps
+// Cached every hour 
+#[cached(time = 3600)]
+async fn get_steam_apps() -> StatusResponse {
+    let resp: Response = REQWEST_CLIENT.get("https://api.steampowered.com/ISteamApps/GetAppList/v0002/").send().await.unwrap();
+    let status: StatusCode = resp.status();
+    let json_response: Value = resp.json::<serde_json::Value>().await.unwrap();
+    let jso = json_response.get("applist").and_then(|val| val.get("apps")).unwrap().clone();
+    // (status, jso)
+    return StatusResponse {status, body:jso}
+}
+
+// Standard JSON search just reading lines
 fn search(json_data: Value, search_line: String) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     if let Some(apps) = json_data.as_array() {
@@ -70,4 +89,7 @@ fn search(json_data: Value, search_line: String) -> Vec<String> {
     }
     found
 }
+
+// TODO
+// Test out using gson for faster json searching
 
